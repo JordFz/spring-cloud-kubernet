@@ -1,8 +1,11 @@
 package mx.jfc.microservices.core.recommendation.services;
 
+import com.mongodb.DuplicateKeyException;
 import mx.jfc.microservices.core.api.core.recommendation.Recommendation;
 import mx.jfc.microservices.core.api.core.recommendation.RecommendationService;
 import mx.jfc.microservices.core.api.exceptions.InvalidInputException;
+import mx.jfc.microservices.core.recommendation.persistence.RecommendationEntity;
+import mx.jfc.microservices.core.recommendation.persistence.RecommendationRepository;
 import mx.jfc.microservices.core.util.ServiceUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,11 +19,29 @@ import java.util.List;
 public class RecommendationServiceImpl implements RecommendationService {
 
     private static Logger LOG = LoggerFactory.getLogger(RecommendationServiceImpl.class);
+
     private final ServiceUtil serviceUtil;
+    private final RecommendationRepository repository;
+    private final RecommendationMapper mapper;
 
     @Autowired
-    public RecommendationServiceImpl(ServiceUtil serviceUtil){
+    public RecommendationServiceImpl(ServiceUtil serviceUtil, RecommendationRepository repository, RecommendationMapper mapper){
         this.serviceUtil = serviceUtil;
+        this.repository = repository;
+        this.mapper = mapper;
+    }
+
+    @Override
+    public Recommendation createRecommendation(Recommendation body) {
+        try{
+            RecommendationEntity entity = mapper.apiToEntity(body);
+            RecommendationEntity newentity = repository.save(entity);
+
+            LOG.debug("createRecommendation: created a recommendation entity: {}/{}", body.getProductId(), body.getRecommendationId());
+            return mapper.entityToApi(newentity);
+        } catch(DuplicateKeyException dke){
+            throw new InvalidInputException("Duplicate key, product id: "+ body.getProductId() + ", Recommendation id: "+ body.getRecommendationId());
+        }
     }
 
     @Override
@@ -29,16 +50,19 @@ public class RecommendationServiceImpl implements RecommendationService {
         if(productId < 1) {
             throw new InvalidInputException("Invalid productID " + productId);
         }
-        if(productId == 113){
-            LOG.debug("No recommendations founds for product id" + productId);
-            return new ArrayList<>();
-        }
-        List<Recommendation> list = new ArrayList<>();
-        list.add(new Recommendation(productId, 1, "Author 1",1, "content 1", serviceUtil.getServiceAddress()));
-        list.add(new Recommendation(productId, 2, "Author 2",2, "content 2", serviceUtil.getServiceAddress()));
-        list.add(new Recommendation(productId, 3, "Author 3",3, "content 3", serviceUtil.getServiceAddress()));
+        List<RecommendationEntity> entityList = repository.findByProductId(productId);
+        List<Recommendation> list = mapper.entityListToApiList(entityList);
+        list.forEach(e -> e.setServiceAddress(serviceUtil.getServiceAddress()));
 
-        LOG.debug("/Recommendation list size: {}", list.size());
+        LOG.debug("getRecommendations: response size {} ", list.size());
+
         return list;
+    }
+
+    @Override
+    public void deleteRecommendations(int productId) {
+        LOG.debug("deleteRecommendations: tries to delete recommendantion for the product with productId: {}", productId);
+        repository.deleteAll(repository.findByProductId(productId));
+
     }
 }
